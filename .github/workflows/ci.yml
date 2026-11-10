@@ -1,0 +1,67 @@
+name: TripPilot AgentOps CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package and test dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Verify zero hardcoded Gemini API keys or service-account files
+        run: |
+          ! grep -RInE 'AIza[0-9A-Za-z_-]{35}|"type":[[:space:]]*"service_account"' travel_concierge tests eval infra scripts
+
+      - name: Run unit, HITL, guardrail, memory, observability & eval-schema tests
+        run: .venv/bin/pytest -v
+
+      # A step's own `env` is not visible to its `if:` condition, and secrets cannot
+      # be referenced in `if:` directly. Detect the optional secret in a separate step
+      # so the key is only exposed to the steps that actually need it.
+      - name: Detect optional live-eval secret
+        id: live_eval
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          if [ -n "${GOOGLE_API_KEY}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "GOOGLE_API_KEY secret not set; skipping live ADK evaluation."
+          fi
+
+      # Installed without the secret in scope so package installs never see the key.
+      - name: Install live-eval dependencies
+        if: steps.live_eval.outputs.enabled == 'true'
+        run: .venv/bin/pip install -e ".[eval]"
+
+      - name: Run live ADK evaluation suite (only when GOOGLE_API_KEY secret is set)
+        if: steps.live_eval.outputs.enabled == 'true'
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_GENAI_USE_VERTEXAI: "FALSE"
+        run: |
+          .venv/bin/adk eval \
+            travel_concierge \
+            eval/travel_concierge.test.json \
+            --config_file_path=eval/test_config.json \
+            --print_detailed_results
