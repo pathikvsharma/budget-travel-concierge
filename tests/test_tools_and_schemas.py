@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
 from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
@@ -40,6 +42,26 @@ def test_all_tools_have_descriptive_names_and_rich_docstrings() -> None:
         assert fn.__doc__ is not None
         assert "Args:" in fn.__doc__
         assert "Returns:" in fn.__doc__
+
+
+def test_every_public_tools_function_documents_args_and_returns() -> None:
+    tools_dir = Path(__file__).resolve().parent.parent / "travel_concierge" / "tools"
+    for py_file in sorted(tools_dir.glob("*.py")):
+        tree = ast.parse(py_file.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and not node.name.startswith("_"):
+                doc = ast.get_docstring(node) or ""
+                assert "Returns:" in doc, f"{py_file.name}::{node.name} lacks 'Returns:'"
+                if node.args.args or node.args.kwonlyargs or node.args.kwarg:
+                    assert "Args:" in doc, f"{py_file.name}::{node.name} lacks 'Args:'"
+
+
+def test_booking_confirmation_predicate_fails_closed() -> None:
+    # Missing, malformed, or non-finite budgets must always require human approval.
+    for unsafe_budget in (None, "not-a-number", float("nan"), float("inf")):
+        assert requires_booking_confirmation(approved_budget_usd=unsafe_budget) is True
+    assert requires_booking_confirmation(approved_budget_usd=120.0) is False
+    assert requires_booking_confirmation(approved_budget_usd=1100.0) is True
 
 
 def test_strict_pydantic_schema_forbids_undeclared_fields() -> None:

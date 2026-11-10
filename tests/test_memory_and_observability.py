@@ -161,4 +161,4 @@ def test_zero_bare_print_statements_in_agent_package() -> None:
         tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                assert node.func.id != "print", f"Bare print() found in {py_file}"
+                assert node.func.id != "print", f"Bare print call found in {py_file}"

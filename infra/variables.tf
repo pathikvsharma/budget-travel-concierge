@@ -37,3 +37,9 @@ variable "reasoning_model" {
   type        = string
   default     = "gemini-3.1-pro-preview"
 }
+
+variable "use_session_db_secret" {
+  description = "Read TRAVEL_SESSION_DB_URL (e.g. a Cloud SQL Postgres URL) from Secret Manager. Add a secret version before enabling."
+  type        = bool
+  default     = false
+}

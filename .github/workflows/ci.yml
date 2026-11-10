@@ -10,6 +10,26 @@ permissions:
   contents: read
 
 jobs:
+  terraform-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Check Terraform formatting
+        run: terraform -chdir=infra fmt -check -diff -recursive
+
+      - name: Initialize providers (no backend)
+        run: terraform -chdir=infra init -backend=false -input=false
+
+      - name: Validate infrastructure as code
+        run: terraform -chdir=infra validate
+
   verify-and-eval:
     runs-on: ubuntu-latest
     steps:

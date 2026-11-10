@@ -6,7 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PORT=8080 \
     HOST=127.0.0.1 \
-    TRAVEL_DATA_DIR=/app/data
+    TRAVEL_DATA_DIR=/app/data \
+    TRAVEL_SESSION_DB_URL=sqlite+aiosqlite:////app/data/trippilot_sessions.db
 
 WORKDIR /app
 
@@ -29,4 +30,6 @@ EXPOSE 8080
 
 # Cloud Run sets HOST=0.0.0.0 via service config only inside its managed ingress sandbox;
 # local docker test runs default securely to HOST=127.0.0.1 unless explicitly overridden.
-CMD ["sh", "-c", "exec adk api_server . --host \"${HOST}\" --port \"${PORT}\" --trace_to_cloud"]
+# Sessions persist through ADK's DatabaseSessionService (override TRAVEL_SESSION_DB_URL
+# with a Cloud SQL Postgres URL for multi-instance production deployments).
+CMD ["sh", "-c", "exec adk api_server . --host \"${HOST}\" --port \"${PORT}\" --session_service_uri \"${TRAVEL_SESSION_DB_URL}\" --trace_to_cloud"]

@@ -44,25 +44,36 @@ flowchart TD
 
 | Pillar | Criterion | Implementation Evidence |
 |---|---|---|
-| **1. Tool & Interface Design** | Comprehensive Tool Docstrings | Detailed Google-style `Args` / `Returns` docstrings on every tool in `travel_concierge/tools/`. |
-| | Descriptive Naming | Action-specific verbs (`search_scheduled_flights`, `search_vetted_hotels`, `retrieve_destination_advisory`, `calculate_itinerary_budget_breakdown`, `load_traveler_preferences`, `save_traveler_preference_note`, `reserve_approved_itinerary`, `cancel_confirmed_reservation`, `lookup_reservation_status`). |
-| | Explicit JSON Schemas | Strict Pydantic v2 `StrictSchema` (`extra="forbid"`) validating all tool inputs and outputs in `travel_concierge/schemas.py`. |
-| | Guided Error Handling | `GuidedToolError` envelopes with actionable `recovery_guidance` and `supported_values` across all tools + `on_tool_error_callback` fallback. |
-| **2. Context & Memory** | Robust System Instructions | Explicit constitutional prompts (persona, travel-only scope, anti-fabrication, PII & HITL policies, shared tool-argument conventions) in `travel_concierge/prompts.py`. |
-| | History Compaction | ADK `EventsCompactionConfig` + `ContextCacheConfig` on `app` (`travel_concierge/agent.py`) + sliding-window `compact_llm_request_history()` (`travel_concierge/memory.py`). |
-| | Persistent Session State | `DatabaseSessionService` (`sqlite+aiosqlite` locally, Cloud SQL Postgres in prod) via `create_persistent_runner()` + parameterized SQLite catalog/booking store (`travel_concierge/database.py`). |
-| | Async Memory Operations | Non-blocking `consolidate_traveler_memory_callback` dispatching tracked `asyncio.create_task()` + `aiosqlite` preference writes (`travel_concierge/memory.py`). |
-| **3. Orchestration & Logic** | Multi-Agent Patterns | Coordinator `LlmAgent` + `SequentialAgent` + 3-agent `ParallelAgent` + 2-agent `LoopAgent` + specialist `booking_execution_agent` (`travel_concierge/sub_agents/`). |
-| | Strategic Model Routing | `ModelRoutingConfig` (`travel_concierge/config.py`): `gemini-3.5-flash` for routing, concurrent catalog lookups, compliance checks, and booking; `gemini-3.1-pro-preview` for multi-constraint itinerary synthesis. |
-| | Guardrails & Policy Plugins | `TravelSafetyPolicyPlugin` (`BasePlugin` in `travel_concierge/guardrails.py`) blocking prompt injection, Level-4 destinations (`KBL`), and single-booking spend-cap overages. |
-| | Human-in-the-Loop Hooks | `FunctionTool(..., require_confirmation=...)` + `ResumabilityConfig(is_resumable=True)` gating `reserve_approved_itinerary` (>= `$250`, fail-closed) and `cancel_confirmed_reservation`; exercised through ADK's real confirmation path in `tests/test_hitl_confirmation.py` and live in `scripts/live_smoke_test.py`. |
-| **4. Observability & Tracing** | Structured JSON Logging | `python-json-logger` `JsonFormatter` in `travel_concierge/observability.py` with zero `print()` statements in library code. |
-| | Intent vs. Outcome Capture | Correlated `tool.intent` (`before_tool_callback`) and `tool.outcome` / `tool.error` (`after_tool_callback` / `on_tool_error_callback`) events with latency metrics, including HITL `awaiting_human_confirmation` / `rejected_by_human` outcomes. |
-| | Distributed Tracing | OpenTelemetry `TracerProvider` linking agent, LLM, and tool spans (LLM spans also closed on model errors) with Google Cloud Trace (`CloudTraceSpanExporter` + `--trace_to_cloud`). |
-| | PII Redaction | Luhn-aware credit card, SSN, passport, email, phone, and token scrubber (`travel_concierge/pii.py`) applied at ingress, pre-LLM, post-LLM, tool args, JSON logs, and memory writes. |
-| **5. Infrastructure & CI/CD** | Automated Evaluation Suites | `eval/travel_concierge.test.json` + `eval/test_config.json` (`adk eval`) + offline `pytest` harness (`tests/`, `scripts/run_eval.sh`) + live end-to-end smoke test (`scripts/live_smoke_test.py`). |
-| | Infrastructure as Code | Terraform (`infra/main.tf`, `variables.tf`, `outputs.tf`), non-root `Dockerfile`, `scripts/deploy_cloud_run.sh`, and `.github/workflows/ci.yml`. |
-| | Secure Secret Management | Zero hardcoded keys; config loaded via Vertex AI ADC, GCP Secret Manager (`maybe_load_api_key_from_secret_manager`), or gitignored `.env` (`travel_concierge/config.py`). |
+| **1. Tool & Interface Design** | Comprehensive Tool Docstrings | Google-style docstrings with `Args` / `Returns` on every function in `travel_concierge/tools/` (`catalog_tools.py`, `memory_tools.py`, `booking_tools.py`), verified by `tests/test_tools_and_schemas.py`. |
+| | Descriptive Naming | Action-specific verbs (`search_scheduled_flights`, `search_vetted_hotels`, `retrieve_destination_advisory`, `calculate_itinerary_budget_breakdown`, `approve_budget_compliant_plan`, `load_traveler_preferences`, `save_traveler_preference_note`, `reserve_approved_itinerary`, `cancel_confirmed_reservation`, `lookup_reservation_status`). |
+| | Explicit JSON Schemas | 20 strict Pydantic v2 models (`StrictSchema`, `extra="forbid"`) in `travel_concierge/schemas.py` validate every tool input and output; typed tool signatures let ADK `FunctionTool` validate model-supplied arguments, and loop exit decisions are constrained to a typed tool call (`approve_budget_compliant_plan`). |
+| | Guided Error Handling | `GuidedToolError` envelopes (`error_code`, `message`, `recovery_guidance`, `supported_values`) returned by all tools instead of tracebacks, plus an `on_tool_error_callback` fallback in `travel_concierge/observability.py`. |
+| **2. Context & Memory** | Robust System Instructions | Constitutional prompts (persona, travel-only scope, anti-fabrication, PII & HITL policies, prompt-injection defense, tool-argument conventions) in `travel_concierge/prompts.py`. |
+| | History Compaction | ADK `EventsCompactionConfig` + `ContextCacheConfig` on `app` (`travel_concierge/agent.py`, built in `travel_concierge/memory.py`) + sliding-window `compact_llm_request_history()` in `before_model_callback`. |
+| | Persistent Session State | ADK `DatabaseSessionService` (`sqlite+aiosqlite`) via `create_persistent_runner()` (`travel_concierge/memory.py`), `adk web --session_service_uri` (Quickstart), and `adk api_server --session_service_uri` in the `Dockerfile`; point `TRAVEL_SESSION_DB_URL` at Cloud SQL Postgres (optionally via Secret Manager, `use_session_db_secret`) for multi-instance production. |
+| | Async Memory Operations | Non-blocking `consolidate_traveler_memory_callback` (`after_agent_callback`) dispatching tracked `asyncio.create_task()` jobs with `aiosqlite` preference writes, plus async `hydrate_traveler_memory_callback` (`travel_concierge/memory.py`). |
+| **3. Orchestration & Logic** | Multi-Agent Patterns | Coordinator `LlmAgent` → `SequentialAgent` (`trip_planning_pipeline`) → 3-agent `ParallelAgent` + 2-agent `LoopAgent`, plus a specialist `booking_execution_agent` (`travel_concierge/sub_agents/`). |
+| | Strategic Model Routing | `ModelRoutingConfig.select_model_for_task()` (`travel_concierge/config.py`): `gemini-3.5-flash` for routing, parallel catalog lookups, compliance checks, and booking; `gemini-3.1-pro-preview` for multi-constraint itinerary synthesis (both overridable via env). |
+| | Guardrails & Policy Plugins | `TravelSafetyPolicyPlugin` (`BasePlugin`, `travel_concierge/guardrails.py`): pre-LLM prompt-injection screening that short-circuits the model call, Level-4 destination blocks (`KBL`), single-booking spend caps, and PII scrubbing at ingress and on model output. |
+| | Human-in-the-Loop Hooks | `FunctionTool(..., require_confirmation=...)` + `ResumabilityConfig(is_resumable=True)` gate `reserve_approved_itinerary` (>= `$250`, fail-closed) and every `cancel_confirmed_reservation`; tested through ADK's real confirmation path (`tests/test_hitl_confirmation.py`) and live (`scripts/live_smoke_test.py`). |
+| **4. Observability & Tracing** | Structured JSON Logging | `python-json-logger` `JsonFormatter` with a mandatory PII log filter (`travel_concierge/observability.py`); an AST test enforces zero bare print calls in the agent package. |
+| | Intent vs. Outcome Capture | Correlated `tool.intent` (`before_tool_callback`) and `tool.outcome` / `tool.error` (`after_tool_callback` / `on_tool_error_callback`) events sharing a correlation ID, with latency and HITL outcomes (`awaiting_human_confirmation`, `rejected_by_human`). |
+| | Distributed Tracing | OpenTelemetry `TracerProvider` linking agent → LLM → tool spans (closed on model errors too) with Google Cloud Trace (`CloudTraceSpanExporter`, `--trace_to_cloud` in the `Dockerfile` and `scripts/deploy_cloud_run.sh`). |
+| | PII Redaction | Luhn-aware credit card, SSN, passport, email, phone, and token scrubber (`travel_concierge/pii.py`) applied at ingress (before session persistence), pre-LLM, post-LLM, tool args, JSON logs, and memory writes. |
+| **5. Infrastructure & CI/CD** | Automated Evaluation Suites | Golden dataset `eval/travel_concierge.test.json` + `eval/test_config.json` run by `adk eval` (`scripts/run_eval.sh`, CI live-eval job), 30-test offline `pytest` suite, and a live end-to-end smoke test (`scripts/live_smoke_test.py`). |
+| | Infrastructure as Code | Terraform (`infra/main.tf`, `variables.tf`, `outputs.tf`; validated in CI), non-root `Dockerfile`, `adk deploy cloud_run` script (`scripts/deploy_cloud_run.sh`), and GitHub Actions CI (`.github/workflows/ci.yml`). |
+| | Secure Secret Management | Zero hardcoded keys or project IDs (CI secret scan); config via Vertex AI ADC, GCP Secret Manager (`maybe_load_api_key_from_secret_manager`), or a gitignored `.env` (`travel_concierge/config.py`, `.env.example`). |
+
+### Verified Results
+
+| Check | Result |
+|---|---|
+| Offline `pytest` suite (`./scripts/run_eval.sh`, CI) | 30/30 passing |
+| Live golden evaluation (`adk eval`, real Gemini models) | 5/5 cases passing; tool-trajectory score 1.0 on every case |
+| Live end-to-end smoke test (`scripts/live_smoke_test.py`) | 4/4: flight lookup, PII redaction, prompt-injection block, HITL booking pause → approve → `TRV-XXXXXXXX` |
+| GitHub Actions CI | Terraform validate + secret scan + tests on every push |
+
+A 5–10 minute demo script (problem, architecture, live scenarios, under-the-hood tour) is in [`docs/DEMO.md`](docs/DEMO.md).
 
 ---
 

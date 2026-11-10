@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 import json
+import logging
 import os
 import re
 import shutil
@@ -55,6 +56,14 @@ CONFIRMATION_CALL_NAME = "adk_request_confirmation"
 RESERVATION_ID_PATTERN = re.compile(r"TRV-[A-Z0-9]{8}")
 FAKE_CARD = "4111 1111 1111 1111"
 FAKE_EMAIL = "jane.doe@example.com"
+
+# Human-readable console report, kept separate from the app's structured JSON logs.
+REPORT = logging.getLogger("trippilot.live_smoke_test")
+_report_handler = logging.StreamHandler(sys.stdout)
+_report_handler.setFormatter(logging.Formatter("%(message)s"))
+REPORT.addHandler(_report_handler)
+REPORT.setLevel(logging.INFO)
+REPORT.propagate = False
 
 
 @dataclass
@@ -110,11 +119,11 @@ async def _new_session(runner: Any, user_id: str) -> str:
 
 def _report(name: str, passed: bool, detail: str, turn: TurnResult | None = None) -> bool:
     status = "PASS" if passed else "FAIL"
-    print(f"[{status}] {name}: {detail}")
+    REPORT.info("[%s] %s: %s", status, name, detail)
     if turn is not None:
-        print(f"         tools={turn.tool_calls or '[]'}")
+        REPORT.info("         tools=%s", turn.tool_calls or "[]")
         preview = " ".join(turn.final_text.split())[:240]
-        print(f"         reply={preview!r}")
+        REPORT.info("         reply=%r", preview)
     return passed
 
 
@@ -238,7 +247,7 @@ async def scenario_hitl_booking(runner: Any) -> bool:
 
 async def main() -> int:
     if not _credentials_configured():
-        print(
+        REPORT.error(
             "No model credentials configured. Either set GOOGLE_GENAI_USE_VERTEXAI=TRUE and "
             "GOOGLE_CLOUD_PROJECT (after `gcloud auth application-default login`), or set "
             "GOOGLE_API_KEY."
@@ -251,9 +260,12 @@ async def main() -> int:
     settings = load_settings()
     backend = "Vertex AI" if settings.use_vertex_ai else "Gemini API key"
     location = os.getenv("GOOGLE_CLOUD_LOCATION", "(client default)")
-    print(
-        f"TripPilot live smoke test | backend={backend} location={location} "
-        f"fast={settings.models.fast_model} reasoning={settings.models.reasoning_model}"
+    REPORT.info(
+        "TripPilot live smoke test | backend=%s location=%s fast=%s reasoning=%s",
+        backend,
+        location,
+        settings.models.fast_model,
+        settings.models.reasoning_model,
     )
 
     runner = create_persistent_runner()
@@ -272,7 +284,7 @@ async def main() -> int:
             )
 
     passed = sum(results)
-    print(f"\n{passed}/{len(results)} live scenarios passed.")
+    REPORT.info("\n%d/%d live scenarios passed.", passed, len(results))
     return 0 if all(results) else 1
 
 

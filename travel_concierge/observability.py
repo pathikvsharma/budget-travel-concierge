@@ -1,7 +1,7 @@
 """Structured JSON logging, intent-vs-outcome capture, and OpenTelemetry tracing.
 
 Features:
-- JSON-structured logs via `python-json-logger` (zero `print()` usage).
+- JSON-structured logs via `python-json-logger` (no bare print statements).
 - Mandatory PII redaction filter attached to every logger handler.
 - OpenTelemetry `TracerProvider` linking turn -> agent -> model -> tool spans,
   with Google Cloud Trace (`CloudTraceSpanExporter`) activation in cloud runs.

@@ -135,12 +135,17 @@ resource "google_cloud_run_v2_service" "trippilot" {
         name  = "HOST"
         value = "0.0.0.0"
       }
-      env {
-        name = "TRAVEL_SESSION_DB_URL"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.session_db_url.secret_id
-            version = "latest"
+      # Opt-in: add a secret version (e.g. a Cloud SQL Postgres URL) before enabling.
+      # Otherwise the container's default SQLite DatabaseSessionService is used.
+      dynamic "env" {
+        for_each = var.use_session_db_secret ? [1] : []
+        content {
+          name = "TRAVEL_SESSION_DB_URL"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.session_db_url.secret_id
+              version = "latest"
+            }
           }
         }
       }

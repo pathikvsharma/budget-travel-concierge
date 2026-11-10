@@ -57,6 +57,17 @@ def requires_booking_confirmation(
     approved budget meets or exceeds `HITL_BOOKING_THRESHOLD_USD` (default $250,
     which covers virtually all multi-day flight+hotel commitments while staying
     configurable via env).
+
+    Args:
+        approved_budget_usd: Traveler-approved booking ceiling in USD, as
+            supplied by the model for `reserve_approved_itinerary`.
+        tool_context: ADK-injected `ToolContext` (unused; accepted for
+            compatibility with ADK's confirmation call).
+        **_other_tool_args: Remaining `reserve_approved_itinerary` arguments,
+            ignored by the threshold check.
+
+    Returns:
+        True when the booking must pause for explicit human confirmation.
     """
     _ = (tool_context, _other_tool_args)
     try:
